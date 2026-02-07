@@ -14,7 +14,7 @@ fi
 echo "Building Blink..."
 cargo build --release
 
-if [ ! -f "target/release/index" ]; then
+if [ ! -f "target/release/blink" ]; then
     echo "Error: Build failed or binary not found"
     exit 1
 fi
@@ -22,7 +22,7 @@ fi
 # Try to install to system directory (requires sudo)
 if command -v sudo &> /dev/null; then
     echo "Installing blink to /usr/local/bin (requires sudo)..."
-    sudo cp target/release/index /usr/local/bin/blink
+    sudo cp target/release/blink /usr/local/bin/blink
     sudo chmod +x /usr/local/bin/blink
     echo "Blink installed successfully to /usr/local/bin"
     echo "You can now run 'blink' from anywhere in your terminal!"
@@ -31,7 +31,7 @@ else
     LOCAL_BIN="$HOME/.local/bin"
     mkdir -p "$LOCAL_BIN"
     echo "Installing blink to $LOCAL_BIN..."
-    cp target/release/index "$LOCAL_BIN/blink"
+    cp target/release/blink "$LOCAL_BIN/blink"
     chmod +x "$LOCAL_BIN/blink"
     echo "Blink installed successfully to $LOCAL_BIN"
     

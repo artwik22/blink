@@ -1,0 +1,509 @@
+/* ====================================================================
+   NAUTILUS CLONE - Native Libadwaita Styling
+   Matches GNOME Files (Nautilus) appearance
+   ==================================================================== */
+
+/* ===== Color Definitions ===== */
+@define-color window_bg_color #242424;
+@define-color window_fg_color #ffffff;
+@define-color headerbar_bg_color #303030;
+@define-color headerbar_fg_color #ffffff;
+@define-color card_bg_color #383838;
+@define-color card_fg_color #ffffff;
+@define-color accent_bg_color #3584e4;
+@define-color accent_color #3584e4;
+@define-color view_bg_color #1e1e1e;
+@define-color sidebar_bg_color #2a2a2a;
+
+/* ===== Animations ===== */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes scaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes slideInFromLeft {
+    from {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* ===== Window ===== */
+window {
+    animation: fadeIn 200ms ease-out;
+}
+
+window.background {
+    animation: fadeIn 200ms ease-out;
+}
+
+/* ===== Navigation Sidebar ===== */
+.navigation-sidebar {
+    background-color: transparent;
+    padding: 4px;
+}
+
+.navigation-sidebar row {
+    border-radius: 6px;
+    margin: 2px 0;
+    min-height: 36px;
+    transition: background-color 200ms ease, transform 150ms ease;
+    animation: slideInFromLeft 250ms ease-out backwards;
+}
+
+.navigation-sidebar row:selected {
+    background-color: alpha(@accent_bg_color, 0.3);
+    color: @window_fg_color;
+}
+
+.navigation-sidebar row:hover:not(:selected) {
+    background-color: alpha(currentColor, 0.05);
+}
+
+.navigation-sidebar row:active {
+    background-color: alpha(currentColor, 0.1);
+}
+
+.navigation-sidebar row:disabled {
+    opacity: 0.5;
+}
+
+/* Fix sidebar background when window is out of focus */
+navigation-split-view > sidebar {
+    background-color: @sidebar_bg_color;
+    border-right: 1px solid alpha(currentColor, 0.1);
+}
+
+navigation-split-view > sidebar:backdrop {
+    background-color: @sidebar_bg_color;
+}
+
+/* Sidebar container styling */
+.sidebar-container {
+    background-color: @sidebar_bg_color;
+}
+
+.sidebar-container:backdrop {
+    background-color: @sidebar_bg_color;
+}
+
+/* ScrolledWindow inside sidebar */
+.sidebar-container scrolledwindow {
+    background-color: @sidebar_bg_color;
+}
+
+.sidebar-container scrolledwindow:backdrop {
+    background-color: @sidebar_bg_color;
+}
+
+/* NavigationPage backdrop */
+navigation-page {
+    background-color: @sidebar_bg_color;
+}
+
+navigation-page:backdrop {
+    background-color: @sidebar_bg_color;
+}
+
+/* Ensure sidebar content maintains background */
+navigation-split-view > sidebar > navigation-page {
+    background-color: @sidebar_bg_color;
+}
+
+navigation-split-view > sidebar > navigation-page:backdrop {
+    background-color: @sidebar_bg_color;
+}
+
+.sidebar-row {
+    min-height: 36px;
+}
+
+.sidebar-icon {
+    color: @accent_color;
+    opacity: 0.9;
+}
+
+.navigation-sidebar row:selected .sidebar-icon {
+    opacity: 1.0;
+    color: @accent_color;
+}
+
+.navigation-sidebar row:disabled .sidebar-icon {
+    opacity: 0.4;
+}
+
+/* Separators */
+separator {
+    min-height: 1px;
+}
+
+.sidebar-separator {
+    margin: 8px 12px;
+    background: none;
+    border: none;
+    border-top: 1px solid alpha(white, 0.2);
+    min-height: 1px;
+    max-height: 1px;
+    opacity: 1 !important;
+}
+
+.sidebar-container label {
+    color: @window_fg_color;
+}
+
+.sidebar-container label:backdrop {
+    color: @window_fg_color;
+}
+
+/* ===== Nautilus Path Bar (Breadcrumbs) ===== */
+.nautilus-path-container {
+    min-width: 200px;
+    max-width: 600px;
+}
+
+.nautilus-path-bar {
+    background-color: alpha(currentColor, 0.06);
+    border-radius: 8px;
+    padding: 0 6px;
+    min-height: 32px;
+}
+
+.nautilus-path-bar button {
+    background: transparent;
+    border: none;
+    padding: 6px 12px;
+    min-height: 28px;
+    border-radius: 6px;
+    font-size: 13px;
+    transition: background-color 150ms ease, transform 100ms ease;
+}
+
+.nautilus-path-bar button:hover {
+    background-color: alpha(currentColor, 0.12);
+    transform: scale(1.05);
+}
+
+.nautilus-path-bar button:active {
+    background-color: alpha(currentColor, 0.18);
+    transform: scale(0.95);
+}
+
+.nautilus-path-bar button.current-path {
+    font-weight: 600;
+    color: @accent_color;
+}
+
+.nautilus-path-bar image {
+    opacity: 0.6;
+    min-width: 14px;
+    margin: 0 2px;
+}
+
+/* Path entry (when editing) */
+.nautilus-path-entry {
+    min-height: 32px;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 13px;
+    background-color: alpha(currentColor, 0.08);
+    border: 1px solid alpha(@accent_color, 0.3);
+    transition: border-color 200ms ease, background-color 200ms ease, transform 150ms ease;
+}
+
+.nautilus-path-entry:focus {
+    border-color: @accent_color;
+    background-color: alpha(currentColor, 0.1);
+    transform: scale(1.01);
+}
+
+/* ===== Nautilus Grid View ===== */
+.nautilus-view {
+    background-color: @view_bg_color;
+}
+
+.nautilus-grid {
+    background-color: transparent;
+    padding: 16px;
+    column-spacing: 20px;
+    row-spacing: 20px;
+}
+
+.nautilus-grid > child {
+    margin: 0;
+    animation-delay: calc(var(--child-index, 0) * 20ms);
+}
+
+.nautilus-tile {
+    padding: 10px;
+    border-radius: 10px;
+    transition: background-color 200ms ease, transform 200ms ease, box-shadow 200ms ease;
+    animation: scaleIn 300ms ease-out backwards;
+}
+
+.nautilus-tile:hover {
+    background-color: alpha(currentColor, 0.06);
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 4px 12px alpha(black, 0.15);
+}
+
+.nautilus-tile:selected {
+    background-color: alpha(@accent_bg_color, 0.2);
+    transform: scale(1.03);
+}
+
+.nautilus-tile:selected:hover {
+    background-color: alpha(@accent_bg_color, 0.25);
+    transform: translateY(-2px) scale(1.05);
+    box-shadow: 0 4px 16px alpha(@accent_color, 0.25);
+}
+
+.nautilus-icon {
+    -gtk-icon-style: regular;
+}
+
+/* Folder icons get the accent color treatment */
+.nautilus-tile image[icon-name="folder"],
+.nautilus-tile image[icon-name^="folder-"] {
+    -gtk-icon-palette: warning @accent_color;
+}
+
+.nautilus-label {
+    font-size: 11px;
+    font-weight: 400;
+    color: @window_fg_color;
+    margin-top: 6px;
+}
+
+.nautilus-tile:selected .nautilus-label {
+    font-weight: 500;
+}
+
+/* ===== Nautilus List View ===== */
+.nautilus-list {
+    background-color: transparent;
+}
+
+.nautilus-list row {
+    border-radius: 6px;
+    margin: 1px 6px;
+    min-height: 40px;
+    transition: background-color 200ms ease, transform 150ms ease;
+    animation: slideIn 250ms ease-out backwards;
+}
+
+.nautilus-list row:selected {
+    background-color: alpha(@accent_bg_color, 0.2);
+    transform: translateX(4px);
+}
+
+.nautilus-list row:hover:not(:selected) {
+    background-color: alpha(currentColor, 0.05);
+    transform: translateX(2px);
+}
+
+.nautilus-list-row {
+    min-height: 40px;
+    padding: 4px 0;
+}
+
+.nautilus-list-icon {
+    -gtk-icon-style: regular;
+}
+
+.nautilus-list-name {
+    font-weight: 400;
+    font-size: 13px;
+}
+
+.nautilus-list-size,
+.nautilus-list-date {
+    font-size: 12px;
+}
+
+/* ===== ScrolledWindow ===== */
+.nautilus-scrolled {
+    background-color: @view_bg_color;
+}
+
+.nautilus-scrolled:backdrop {
+    background-color: @view_bg_color;
+}
+
+/* ===== Entry Fields ===== */
+.nautilus-entry {
+    min-height: 36px;
+    border-radius: 8px;
+}
+
+.nautilus-search {
+    min-height: 36px;
+    border-radius: 8px;
+}
+
+/* ===== Header Bar ===== */
+headerbar {
+    background-color: @headerbar_bg_color;
+    box-shadow: none;
+    border-bottom: 1px solid alpha(currentColor, 0.1);
+    animation: slideIn 250ms ease-out;
+    color: white; /* Ensure text/icons are white */
+}
+
+headerbar label,
+headerbar image,
+headerbar button,
+headerbar entry {
+    color: white !important;
+}
+
+headerbar:backdrop {
+    background-color: @headerbar_bg_color;
+    color: alpha(white, 0.7);
+}
+
+headerbar.flat {
+    background-color: transparent;
+    border-bottom: 1px solid alpha(currentColor, 0.1);
+}
+
+headerbar.flat:backdrop {
+    background-color: transparent;
+}
+
+/* Linked buttons in header */
+headerbar .linked button {
+    border-radius: 0;
+    min-width: 36px;
+    min-height: 36px;
+}
+
+headerbar .linked button:first-child {
+    border-top-left-radius: 8px;
+    border-bottom-left-radius: 8px;
+}
+
+headerbar .linked button:last-child {
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
+headerbar .linked button:only-child {
+    border-radius: 8px;
+}
+
+/* ===== Popovers ===== */
+popover.menu {
+    padding: 4px;
+}
+
+popover.menu modelbutton {
+    border-radius: 6px;
+    padding: 8px 12px;
+    min-height: 28px;
+    transition: background-color 150ms ease, transform 100ms ease;
+}
+
+popover.menu modelbutton:hover {
+    background-color: alpha(currentColor, 0.08);
+    transform: translateX(2px);
+}
+
+/* ===== Context Menu ===== */
+popover.menu separator {
+    margin: 4px 8px;
+}
+
+/* ===== Utility Classes ===== */
+.dim-label {
+    opacity: 0.55;
+}
+
+.pinned-section {
+    transition: background-color 200ms ease;
+    border-radius: 8px;
+    margin: 4px;
+    padding: 2px;
+    min-height: 60px;
+}
+
+.pinned-section.drop-highlight {
+    background-color: alpha(@accent_bg_color, 0.15);
+    outline: 2px dashed @accent_color;
+    outline-offset: -2px;
+}
+
+.caption {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.7;
+}
+
+/* ===== Selection ===== */
+gridview:focus child:selected,
+listview:focus row:selected {
+    outline: 2px solid @accent_color;
+    outline-offset: -2px;
+}
+
+/* ===== Split View ===== */
+navigation-split-view {
+    background-color: @view_bg_color;
+    transition: background-color 200ms ease;
+}
+
+navigation-split-view:backdrop {
+    background-color: @view_bg_color;
+}
+
+/* ===== Message Dialogs ===== */
+messagedialog .dialog-action-area button {
+    min-height: 36px;
+    border-radius: 8px;
+}
+
+messagedialog .dialog-action-area button.suggested-action {
+    background-color: @accent_bg_color;
+    color: white;
+}
+
+messagedialog .dialog-action-area button.destructive-action {
+    background-color: #c01c28;
+    color: white;
+}
+
+/* ===== Empty State ===== */
+.nautilus-view:empty {
+    background-color: @view_bg_color;
+}
