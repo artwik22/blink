@@ -69,15 +69,10 @@
 ### From Source
 
 ```bash
-# Clone the repository
-git clone https://github.com/artwik22/blink.git
-cd blink
-
-# Build with Cargo
-cargo build --release
-
-# Run
-./target/release/index
+mkdir ~/.config/alloy
+git clone https://github.com/artwik22/blink ~/.config/alloy/blink
+cd ~/.config/alloy/blink
+./install.sh
 ```
 
 ### Dependencies
