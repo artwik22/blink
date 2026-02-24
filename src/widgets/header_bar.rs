@@ -1,9 +1,23 @@
 use gtk4::prelude::*;
-use gtk4::{Box as GtkBox, Button, Entry, Orientation, Popover, SearchEntry, ToggleButton};
+use gtk4::{Box as GtkBox, Button, CheckButton, Entry, Label, Orientation, Popover, SearchEntry, ToggleButton};
 use libadwaita as adw;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SortField {
+    Name,
+    Size,
+    Date,
+    Type,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SortDirection {
+    Ascending,
+    Descending,
+}
 
 #[derive(Clone)]
 pub struct NautilusHeaderBar {
@@ -14,6 +28,7 @@ pub struct NautilusHeaderBar {
     search_entry: SearchEntry,
     search_popover: Popover,
     view_toggle_btn: Button,
+    preview_toggle_btn: ToggleButton,
     is_editing_path: Rc<RefCell<bool>>,
 
     on_path_clicked: Rc<RefCell<Option<Box<dyn Fn(PathBuf)>>>>,
@@ -21,6 +36,9 @@ pub struct NautilusHeaderBar {
     on_search: Rc<RefCell<Option<Box<dyn Fn(String)>>>>,
     on_view_toggle: Rc<RefCell<Option<Box<dyn Fn()>>>>,
     on_new_folder: Rc<RefCell<Option<Box<dyn Fn()>>>>,
+    on_new_file: Rc<RefCell<Option<Box<dyn Fn()>>>>,
+    on_preview_toggle: Rc<RefCell<Option<Box<dyn Fn(bool)>>>>,
+    on_sort_changed: Rc<RefCell<Option<Box<dyn Fn(SortField, SortDirection)>>>>,
 }
 
 impl NautilusHeaderBar {
@@ -119,6 +137,81 @@ impl NautilusHeaderBar {
             .build();
         container.pack_end(&view_toggle_btn);
 
+        // Preview toggle
+        let preview_toggle_btn = ToggleButton::builder()
+            .icon_name("view-reveal-symbolic")
+            .tooltip_text("Toggle Preview Panel")
+            .build();
+        container.pack_end(&preview_toggle_btn);
+
+        // Sort button with popover
+        let sort_btn = Button::builder()
+            .icon_name("view-sort-ascending-symbolic")
+            .tooltip_text("Sort")
+            .build();
+
+        let sort_popover = Popover::builder()
+            .has_arrow(true)
+            .build();
+        sort_popover.set_parent(&sort_btn);
+
+        let sort_box = GtkBox::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(4)
+            .margin_start(8)
+            .margin_end(8)
+            .margin_top(8)
+            .margin_bottom(8)
+            .build();
+        
+        let sort_label = Label::builder()
+            .label("Sort by")
+            .halign(gtk4::Align::Start)
+            .css_classes(["caption", "dim-label"])
+            .build();
+        sort_box.append(&sort_label);
+
+        // Sort field radio buttons
+        let sort_name = CheckButton::builder().label("Name").active(true).build();
+        let sort_size = CheckButton::builder().label("Size").build();
+        let sort_date = CheckButton::builder().label("Date Modified").build();
+        let sort_type = CheckButton::builder().label("Type").build();
+        sort_size.set_group(Some(&sort_name));
+        sort_date.set_group(Some(&sort_name));
+        sort_type.set_group(Some(&sort_name));
+
+        sort_box.append(&sort_name);
+        sort_box.append(&sort_size);
+        sort_box.append(&sort_date);
+        sort_box.append(&sort_type);
+
+        let dir_sep = gtk4::Separator::new(Orientation::Horizontal);
+        sort_box.append(&dir_sep);
+
+        let dir_label = Label::builder()
+            .label("Direction")
+            .halign(gtk4::Align::Start)
+            .css_classes(["caption", "dim-label"])
+            .build();
+        sort_box.append(&dir_label);
+
+        let sort_asc = CheckButton::builder().label("Ascending").active(true).build();
+        let sort_desc = CheckButton::builder().label("Descending").build();
+        sort_desc.set_group(Some(&sort_asc));
+        sort_box.append(&sort_asc);
+        sort_box.append(&sort_desc);
+
+        sort_popover.set_child(Some(&sort_box));
+
+        {
+            let sort_popover_clone = sort_popover.clone();
+            sort_btn.connect_clicked(move |_| {
+                sort_popover_clone.popup();
+            });
+        }
+
+        container.pack_end(&sort_btn);
+
         // New folder button
         let new_folder_btn = Button::builder()
             .icon_name("folder-new-symbolic")
@@ -126,12 +219,22 @@ impl NautilusHeaderBar {
             .build();
         container.pack_end(&new_folder_btn);
 
+        // New file button
+        let new_file_btn = Button::builder()
+            .icon_name("document-new-symbolic")
+            .tooltip_text("New File")
+            .build();
+        container.pack_end(&new_file_btn);
+
         // Callbacks
         let on_path_clicked: Rc<RefCell<Option<Box<dyn Fn(PathBuf)>>>> = Rc::new(RefCell::new(None));
         let on_path_entered: Rc<RefCell<Option<Box<dyn Fn(PathBuf)>>>> = Rc::new(RefCell::new(None));
         let on_search: Rc<RefCell<Option<Box<dyn Fn(String)>>>> = Rc::new(RefCell::new(None));
         let on_view_toggle: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
         let on_new_folder: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+        let on_new_file: Rc<RefCell<Option<Box<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+        let on_preview_toggle: Rc<RefCell<Option<Box<dyn Fn(bool)>>>> = Rc::new(RefCell::new(None));
+        let on_sort_changed: Rc<RefCell<Option<Box<dyn Fn(SortField, SortDirection)>>>> = Rc::new(RefCell::new(None));
         let is_editing_path = Rc::new(RefCell::new(false));
 
         // Make breadcrumbs clickable to show entry (double-click)
@@ -270,6 +373,68 @@ impl NautilusHeaderBar {
             });
         }
 
+        {
+            let on_new_file_clone = on_new_file.clone();
+            new_file_btn.connect_clicked(move |_| {
+                if let Some(ref callback) = *on_new_file_clone.borrow() {
+                    callback();
+                }
+            });
+        }
+
+        {
+            let on_preview_toggle_clone = on_preview_toggle.clone();
+            preview_toggle_btn.connect_toggled(move |btn| {
+                if let Some(ref callback) = *on_preview_toggle_clone.borrow() {
+                    callback(btn.is_active());
+                }
+            });
+        }
+
+        // Sort callbacks
+        {
+            let on_sort_clone = on_sort_changed.clone();
+            let sort_name_c = sort_name.clone();
+            let sort_size_c = sort_size.clone();
+            let sort_date_c = sort_date.clone();
+            let sort_asc_c = sort_asc.clone();
+
+            let make_sort_handler = move || {
+                let field = if sort_name_c.is_active() {
+                    SortField::Name
+                } else if sort_size_c.is_active() {
+                    SortField::Size
+                } else if sort_date_c.is_active() {
+                    SortField::Date
+                } else {
+                    SortField::Type
+                };
+                let direction = if sort_asc_c.is_active() {
+                    SortDirection::Ascending
+                } else {
+                    SortDirection::Descending
+                };
+                if let Some(ref callback) = *on_sort_clone.borrow() {
+                    callback(field, direction);
+                }
+            };
+
+            let handler = Rc::new(make_sort_handler);
+            
+            let h = handler.clone();
+            sort_name.connect_toggled(move |_| { h(); });
+            let h = handler.clone();
+            sort_size.connect_toggled(move |_| { h(); });
+            let h = handler.clone();
+            sort_date.connect_toggled(move |_| { h(); });
+            let h = handler.clone();
+            sort_type.connect_toggled(move |_| { h(); });
+            let h = handler.clone();
+            sort_asc.connect_toggled(move |_| { h(); });
+            let h = handler.clone();
+            sort_desc.connect_toggled(move |_| { h(); });
+        }
+
         // Add keyboard shortcut Ctrl+L to show path entry
         {
             let breadcrumbs_box_clone = breadcrumbs_box.clone();
@@ -302,12 +467,16 @@ impl NautilusHeaderBar {
             search_entry,
             search_popover,
             view_toggle_btn,
+            preview_toggle_btn,
             is_editing_path,
             on_path_clicked,
             on_path_entered,
             on_search,
             on_view_toggle,
             on_new_folder,
+            on_new_file,
+            on_preview_toggle,
+            on_sort_changed,
         }
     }
 
@@ -441,6 +610,18 @@ impl NautilusHeaderBar {
 
     pub fn connect_new_folder<F: Fn() + 'static>(&self, callback: F) {
         *self.on_new_folder.borrow_mut() = Some(Box::new(callback));
+    }
+
+    pub fn connect_new_file<F: Fn() + 'static>(&self, callback: F) {
+        *self.on_new_file.borrow_mut() = Some(Box::new(callback));
+    }
+
+    pub fn connect_preview_toggle<F: Fn(bool) + 'static>(&self, callback: F) {
+        *self.on_preview_toggle.borrow_mut() = Some(Box::new(callback));
+    }
+
+    pub fn connect_sort_changed<F: Fn(SortField, SortDirection) + 'static>(&self, callback: F) {
+        *self.on_sort_changed.borrow_mut() = Some(Box::new(callback));
     }
 
     pub fn set_view_icon(&self, is_grid: bool) {

@@ -13,6 +13,7 @@ use std::io::Write;
 use async_channel;
 
 use crate::core::{FileEntry, FileOperations, Scanner};
+use crate::widgets::header_bar::{SortField, SortDirection};
 
 // #region agent log
 fn debug_log(hypothesis_id: &str, location: &str, message: &str, data: serde_json::Value) {
@@ -179,7 +180,11 @@ pub struct FileGridView {
     on_pin: Rc<RefCell<Option<Box<dyn Fn(PathBuf)>>>>,
     on_open_terminal: Rc<RefCell<Option<Box<dyn Fn(PathBuf)>>>>,
     on_open_micro: Rc<RefCell<Option<Box<dyn Fn(PathBuf)>>>>,
+    on_properties: Rc<RefCell<Option<Box<dyn Fn(PathBuf)>>>>,
+    on_selection_changed: Rc<RefCell<Option<Box<dyn Fn(Vec<PathBuf>)>>>>,
     current_scan_id: Rc<RefCell<u64>>,
+    sort_field: Rc<RefCell<SortField>>,
+    sort_direction: Rc<RefCell<SortDirection>>,
 }
 
 impl FileGridView {
@@ -353,7 +358,11 @@ impl FileGridView {
         // on_pin is already created above for use in factories
         let on_open_terminal: Rc<RefCell<Option<Box<dyn Fn(PathBuf)>>>> = Rc::new(RefCell::new(None));
         let on_open_micro: Rc<RefCell<Option<Box<dyn Fn(PathBuf)>>>> = Rc::new(RefCell::new(None));
+        let on_properties: Rc<RefCell<Option<Box<dyn Fn(PathBuf)>>>> = Rc::new(RefCell::new(None));
+        let on_selection_changed: Rc<RefCell<Option<Box<dyn Fn(Vec<PathBuf>)>>>> = Rc::new(RefCell::new(None));
         let current_scan_id = Rc::new(RefCell::new(0u64));
+        let sort_field = Rc::new(RefCell::new(SortField::Name));
+        let sort_direction = Rc::new(RefCell::new(SortDirection::Ascending));
 
         // Keyboard shortcuts for Grid and List views
         {
@@ -433,6 +442,15 @@ impl FileGridView {
                         return glib::Propagation::Stop;
                     }
                 }
+
+                // Ctrl+A - Select All
+                if key == gtk4::gdk::Key::a && state.contains(gtk4::gdk::ModifierType::CONTROL_MASK) {
+                    let n_items = selection_clone.n_items();
+                    if n_items > 0 {
+                        selection_clone.select_all();
+                        return glib::Propagation::Stop;
+                    }
+                }
                 
                 glib::Propagation::Proceed
             });
@@ -491,7 +509,11 @@ impl FileGridView {
             let on_paste_clone = on_paste.clone();
             let on_delete_clone = on_delete.clone();
             let on_rename_clone = on_rename.clone();
+            let on_pin_clone = on_pin.clone();
+            let on_open_terminal_clone = on_open_terminal.clone();
+            let on_properties_clone = on_properties.clone();
             let selection_clone = selection.clone();
+            let current_path_clone = current_path.clone();
             let grid_view_clone = grid_view.clone();
             let current_popover: Rc<RefCell<Option<PopoverMenu>>> = Rc::new(RefCell::new(None));
 
@@ -533,6 +555,7 @@ impl FileGridView {
                     // File section
                     let file_section = gio::Menu::new();
                     file_section.append(Some("Open"), Some("file.open"));
+                    file_section.append(Some("Open With…"), Some("file.open_with"));
                     if selected_paths.len() == 1 {
                         file_section.append(Some("Rename…"), Some("file.rename"));
                     }
@@ -542,12 +565,25 @@ impl FileGridView {
                     let edit_section = gio::Menu::new();
                     edit_section.append(Some("Copy"), Some("file.copy"));
                     edit_section.append(Some("Cut"), Some("file.cut"));
+                    edit_section.append(Some("Paste"), Some("file.paste"));
                     menu.append_section(None, &edit_section);
-                    
-                    // Delete section
-                    let delete_section = gio::Menu::new();
-                    delete_section.append(Some("Move to Trash"), Some("file.delete"));
-                    menu.append_section(None, &delete_section);
+
+                    // Tools section
+                    let tools_section = gio::Menu::new();
+                    tools_section.append(Some("Open in Terminal"), Some("file.open_terminal"));
+                    // Pin for folders
+                    if selected_paths.len() == 1 && selected_paths[0].is_dir() {
+                        tools_section.append(Some("Pin to Sidebar"), Some("file.pin"));
+                    }
+                    menu.append_section(None, &tools_section);
+
+                    // Properties & Delete section
+                    let bottom_section = gio::Menu::new();
+                    if selected_paths.len() == 1 {
+                        bottom_section.append(Some("Properties"), Some("file.properties"));
+                    }
+                    bottom_section.append(Some("Move to Trash"), Some("file.delete"));
+                    menu.append_section(None, &bottom_section);
                 } else {
                     let paste_section = gio::Menu::new();
                     paste_section.append(Some("Paste"), Some("file.paste"));
@@ -637,6 +673,76 @@ impl FileGridView {
                     action_group.add_action(&action);
                 }
 
+                // Open With action
+                {
+                    let paths = selected_paths.clone();
+                    let action = gio::SimpleAction::new("open_with", None);
+                    action.connect_activate(move |_, _| {
+                        if let Some(path) = paths.first() {
+                            let path_str = path.to_string_lossy().to_string();
+                            let _ = std::process::Command::new("xdg-open")
+                                .arg(&path_str)
+                                .spawn();
+                        }
+                    });
+                    action_group.add_action(&action);
+                }
+
+                // Open in Terminal action
+                {
+                    let paths = selected_paths.clone();
+                    let current_path_c = current_path_clone.borrow().clone();
+                    let on_terminal = on_open_terminal_clone.clone();
+                    let action = gio::SimpleAction::new("open_terminal", None);
+                    action.connect_activate(move |_, _| {
+                        let target = if let Some(path) = paths.first() {
+                            if path.is_dir() {
+                                path.clone()
+                            } else {
+                                path.parent().unwrap_or(std::path::Path::new("/")).to_path_buf()
+                            }
+                        } else {
+                            current_path_c.clone()
+                        };
+                        if let Some(ref callback) = *on_terminal.borrow() {
+                            callback(target);
+                        }
+                    });
+                    action_group.add_action(&action);
+                }
+
+                // Pin action
+                {
+                    let paths = selected_paths.clone();
+                    let on_pin_c = on_pin_clone.clone();
+                    let action = gio::SimpleAction::new("pin", None);
+                    action.connect_activate(move |_, _| {
+                        if let Some(path) = paths.first() {
+                            if path.is_dir() {
+                                if let Some(ref callback) = *on_pin_c.borrow() {
+                                    callback(path.clone());
+                                }
+                            }
+                        }
+                    });
+                    action_group.add_action(&action);
+                }
+
+                // Properties action
+                {
+                    let paths = selected_paths.clone();
+                    let on_props = on_properties_clone.clone();
+                    let action = gio::SimpleAction::new("properties", None);
+                    action.connect_activate(move |_, _| {
+                        if let Some(path) = paths.first() {
+                            if let Some(ref callback) = *on_props.borrow() {
+                                callback(path.clone());
+                            }
+                        }
+                    });
+                    action_group.add_action(&action);
+                }
+
                 // Create popover and attach action group
                 let popover = PopoverMenu::from_model(Some(&menu));
                 
@@ -668,7 +774,11 @@ impl FileGridView {
             let on_paste_clone = on_paste.clone();
             let on_delete_clone = on_delete.clone();
             let on_rename_clone = on_rename.clone();
+            let on_pin_clone = on_pin.clone();
+            let on_open_terminal_clone = on_open_terminal.clone();
+            let on_properties_clone = on_properties.clone();
             let selection_clone = selection.clone();
+            let current_path_clone = current_path.clone();
             let list_view_clone = list_view.clone();
             let current_popover: Rc<RefCell<Option<PopoverMenu>>> = Rc::new(RefCell::new(None));
 
@@ -702,12 +812,13 @@ impl FileGridView {
                     }
                 }
 
-                // Build menu using gio::Menu
+                // Build menu using gio::Menu (same structure as grid view)
                 let menu = gio::Menu::new();
                 
                 if !selected_paths.is_empty() {
                     let file_section = gio::Menu::new();
                     file_section.append(Some("Open"), Some("file.open"));
+                    file_section.append(Some("Open With…"), Some("file.open_with"));
                     if selected_paths.len() == 1 {
                         file_section.append(Some("Rename…"), Some("file.rename"));
                     }
@@ -716,11 +827,22 @@ impl FileGridView {
                     let edit_section = gio::Menu::new();
                     edit_section.append(Some("Copy"), Some("file.copy"));
                     edit_section.append(Some("Cut"), Some("file.cut"));
+                    edit_section.append(Some("Paste"), Some("file.paste"));
                     menu.append_section(None, &edit_section);
-                    
-                    let delete_section = gio::Menu::new();
-                    delete_section.append(Some("Move to Trash"), Some("file.delete"));
-                    menu.append_section(None, &delete_section);
+
+                    let tools_section = gio::Menu::new();
+                    tools_section.append(Some("Open in Terminal"), Some("file.open_terminal"));
+                    if selected_paths.len() == 1 && selected_paths[0].is_dir() {
+                        tools_section.append(Some("Pin to Sidebar"), Some("file.pin"));
+                    }
+                    menu.append_section(None, &tools_section);
+
+                    let bottom_section = gio::Menu::new();
+                    if selected_paths.len() == 1 {
+                        bottom_section.append(Some("Properties"), Some("file.properties"));
+                    }
+                    bottom_section.append(Some("Move to Trash"), Some("file.delete"));
+                    menu.append_section(None, &bottom_section);
                 } else {
                     let paste_section = gio::Menu::new();
                     paste_section.append(Some("Paste"), Some("file.paste"));
@@ -795,6 +917,76 @@ impl FileGridView {
                     action.connect_activate(move |_, _| {
                         if let Some(path) = paths.first() {
                             if let Some(ref callback) = *on_rename.borrow() {
+                                callback(path.clone());
+                            }
+                        }
+                    });
+                    action_group.add_action(&action);
+                }
+
+                // Open With action
+                {
+                    let paths = selected_paths.clone();
+                    let action = gio::SimpleAction::new("open_with", None);
+                    action.connect_activate(move |_, _| {
+                        if let Some(path) = paths.first() {
+                            let path_str = path.to_string_lossy().to_string();
+                            let _ = std::process::Command::new("xdg-open")
+                                .arg(&path_str)
+                                .spawn();
+                        }
+                    });
+                    action_group.add_action(&action);
+                }
+
+                // Open in Terminal action
+                {
+                    let paths = selected_paths.clone();
+                    let current_path_c = current_path_clone.borrow().clone();
+                    let on_terminal = on_open_terminal_clone.clone();
+                    let action = gio::SimpleAction::new("open_terminal", None);
+                    action.connect_activate(move |_, _| {
+                        let target = if let Some(path) = paths.first() {
+                            if path.is_dir() {
+                                path.clone()
+                            } else {
+                                path.parent().unwrap_or(std::path::Path::new("/")).to_path_buf()
+                            }
+                        } else {
+                            current_path_c.clone()
+                        };
+                        if let Some(ref callback) = *on_terminal.borrow() {
+                            callback(target);
+                        }
+                    });
+                    action_group.add_action(&action);
+                }
+
+                // Pin action
+                {
+                    let paths = selected_paths.clone();
+                    let on_pin_c = on_pin_clone.clone();
+                    let action = gio::SimpleAction::new("pin", None);
+                    action.connect_activate(move |_, _| {
+                        if let Some(path) = paths.first() {
+                            if path.is_dir() {
+                                if let Some(ref callback) = *on_pin_c.borrow() {
+                                    callback(path.clone());
+                                }
+                            }
+                        }
+                    });
+                    action_group.add_action(&action);
+                }
+
+                // Properties action
+                {
+                    let paths = selected_paths.clone();
+                    let on_props = on_properties_clone.clone();
+                    let action = gio::SimpleAction::new("properties", None);
+                    action.connect_activate(move |_, _| {
+                        if let Some(path) = paths.first() {
+                            if let Some(ref callback) = *on_props.borrow() {
                                 callback(path.clone());
                             }
                         }
@@ -1175,7 +1367,11 @@ impl FileGridView {
             on_pin,
             on_open_terminal,
             on_open_micro,
+            on_properties,
+            on_selection_changed,
             current_scan_id,
+            sort_field,
+            sort_direction,
         }
     }
 
@@ -1320,6 +1516,96 @@ impl FileGridView {
 
     pub fn connect_open_micro<F: Fn(PathBuf) + 'static>(&self, callback: F) {
         *self.on_open_micro.borrow_mut() = Some(Box::new(callback));
+    }
+
+    pub fn connect_properties<F: Fn(PathBuf) + 'static>(&self, callback: F) {
+        *self.on_properties.borrow_mut() = Some(Box::new(callback));
+    }
+
+    pub fn connect_selection_changed<F: Fn(Vec<PathBuf>) + 'static>(&self, callback: F) {
+        *self.on_selection_changed.borrow_mut() = Some(Box::new(callback));
+    }
+
+    pub fn select_all(&self) {
+        self.selection.select_all();
+    }
+
+    pub fn get_selected_paths(&self) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        let n_items = self.selection.n_items();
+        for i in 0..n_items {
+            if self.selection.is_selected(i) {
+                if let Some(item) = self.selection.item(i) {
+                    if let Ok(file_obj) = item.downcast::<FileObject>() {
+                        paths.push(file_obj.path());
+                    }
+                }
+            }
+        }
+        paths
+    }
+
+    pub fn set_sort_mode(&self, field: SortField, direction: SortDirection) {
+        *self.sort_field.borrow_mut() = field;
+        *self.sort_direction.borrow_mut() = direction;
+        
+        let mut entries = self.all_entries.borrow().clone();
+        
+        match field {
+            SortField::Name => {
+                entries.sort_by(|a, b| {
+                    let ord = (!a.is_directory).cmp(&(!b.is_directory));
+                    if ord != std::cmp::Ordering::Equal { return ord; }
+                    a.name.to_lowercase().cmp(&b.name.to_lowercase())
+                });
+            }
+            SortField::Size => {
+                entries.sort_by(|a, b| {
+                    let ord = (!a.is_directory).cmp(&(!b.is_directory));
+                    if ord != std::cmp::Ordering::Equal { return ord; }
+                    a.size.cmp(&b.size)
+                });
+            }
+            SortField::Date => {
+                entries.sort_by(|a, b| {
+                    let ord = (!a.is_directory).cmp(&(!b.is_directory));
+                    if ord != std::cmp::Ordering::Equal { return ord; }
+                    a.modified.cmp(&b.modified)
+                });
+            }
+            SortField::Type => {
+                entries.sort_by(|a, b| {
+                    let ord = (!a.is_directory).cmp(&(!b.is_directory));
+                    if ord != std::cmp::Ordering::Equal { return ord; }
+                    let ext_a = a.name.rsplit('.').next().unwrap_or("").to_lowercase();
+                    let ext_b = b.name.rsplit('.').next().unwrap_or("").to_lowercase();
+                    ext_a.cmp(&ext_b)
+                });
+            }
+        }
+
+        if direction == SortDirection::Descending {
+            // Reverse within directories and files groups separately
+            let dir_count = entries.iter().filter(|e| e.is_directory).count();
+            entries[..dir_count].reverse();
+            entries[dir_count..].reverse();
+        }
+
+        self.store.remove_all();
+        for entry in &entries {
+            self.store.append(&FileObject::new(entry));
+        }
+    }
+
+    pub fn file_count(&self) -> usize {
+        self.all_entries.borrow().len()
+    }
+
+    pub fn dir_count(&self) -> (usize, usize) {
+        let entries = self.all_entries.borrow();
+        let dirs = entries.iter().filter(|e| e.is_directory).count();
+        let files = entries.len() - dirs;
+        (dirs, files)
     }
 
     pub fn rename_selected(&self) {

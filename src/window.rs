@@ -14,7 +14,7 @@ use std::time::Duration;
 use async_channel;
 
 use crate::core::{Clipboard, ClipboardMode, FileOperations, SidebarPrefs, ProgressInfo};
-use crate::widgets::{FileGridView, NautilusHeaderBar, NautilusSidebar};
+use crate::widgets::{FileGridView, NautilusHeaderBar, NautilusSidebar, PreviewPanel};
 
 // #region agent log
 fn debug_log(hypothesis_id: &str, location: &str, message: &str, data: serde_json::Value) {
@@ -80,6 +80,10 @@ impl BlinkWindow {
         // Add header bar to content area so sidebar spans full height
         content_box.append(header_bar.container());
 
+        // Main area: file view + preview panel side by side
+        let main_hbox = GtkBox::new(Orientation::Horizontal, 0);
+        main_hbox.set_vexpand(true);
+
         // File grid view with scroll
         let file_view = FileGridView::new();
         let scrolled = ScrolledWindow::builder()
@@ -88,7 +92,38 @@ impl BlinkWindow {
             .child(file_view.container())
             .build();
         scrolled.add_css_class("nautilus-scrolled");
-        content_box.append(&scrolled);
+        main_hbox.append(&scrolled);
+
+        // Preview panel (hidden by default)
+        let preview_panel = PreviewPanel::new();
+        preview_panel.container().set_visible(false);
+        main_hbox.append(preview_panel.container());
+
+        content_box.append(&main_hbox);
+
+        // Status bar
+        let status_bar = GtkBox::builder()
+            .orientation(Orientation::Horizontal)
+            .spacing(12)
+            .margin_start(12)
+            .margin_end(12)
+            .margin_top(4)
+            .margin_bottom(4)
+            .css_classes(["status-bar"])
+            .build();
+
+        let status_file_count = Label::builder()
+            .halign(gtk4::Align::Start)
+            .css_classes(["dim-label", "caption"])
+            .build();
+        let status_selection = Label::builder()
+            .halign(gtk4::Align::End)
+            .hexpand(true)
+            .css_classes(["dim-label", "caption"])
+            .build();
+        status_bar.append(&status_file_count);
+        status_bar.append(&status_selection);
+        content_box.append(&status_bar);
 
         let content_page = adw::NavigationPage::builder()
             .title("Files")
@@ -117,6 +152,12 @@ impl BlinkWindow {
                     file_view_clone.set_show_hidden(new_hidden);
                     file_view_clone.refresh();
                     println!("Toggled hidden files (session): {}", new_hidden);
+                    return gtk4::glib::Propagation::Stop;
+                }
+                
+                // Ctrl+A to select all
+                if keyval == gtk4::gdk::Key::a && modifiers & gtk4::gdk::ModifierType::CONTROL_MASK.bits() != 0 {
+                    file_view_clone.select_all();
                     return gtk4::glib::Propagation::Stop;
                 }
                 
@@ -397,7 +438,6 @@ impl BlinkWindow {
                     dialog.set_default_response(Some("create"));
                     dialog.set_close_response("cancel");
 
-                    // Select all text and focus entry when dialog opens
                     let entry_clone = entry.clone();
                     glib::idle_add_local_once(move || {
                         entry_clone.grab_focus();
@@ -423,6 +463,132 @@ impl BlinkWindow {
 
                     dialog.present(Some(&window));
                 }
+            });
+        }
+
+        // Connect new file
+        {
+            let current_path = current_path.clone();
+            let file_view = file_view.clone();
+            let window_weak = window.downgrade();
+
+            header_bar.connect_new_file(move || {
+                let current = current_path.borrow().clone();
+                let file_view = file_view.clone();
+                
+                if let Some(window) = window_weak.upgrade() {
+                    let dialog = adw::AlertDialog::builder()
+                        .heading("New File")
+                        .body("Enter name for the new file")
+                        .build();
+
+                    let entry = gtk4::Entry::builder()
+                        .placeholder_text("File name")
+                        .text("untitled")
+                        .build();
+                    entry.add_css_class("nautilus-entry");
+                    entry.set_activates_default(true);
+                    dialog.set_extra_child(Some(&entry));
+
+                    dialog.add_response("cancel", "Cancel");
+                    dialog.add_response("create", "Create");
+                    dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
+                    dialog.set_default_response(Some("create"));
+                    dialog.set_close_response("cancel");
+
+                    let entry_clone = entry.clone();
+                    glib::idle_add_local_once(move || {
+                        entry_clone.grab_focus();
+                        entry_clone.select_region(0, -1);
+                    });
+
+                    let current_clone = current.clone();
+                    dialog.connect_response(None, move |dialog, response| {
+                        if response == "create" {
+                            if let Some(entry) = dialog.extra_child().and_downcast::<gtk4::Entry>() {
+                                let name = entry.text();
+                                if !name.is_empty() {
+                                    let new_path = current_clone.join(name.as_str());
+                                    if let Err(e) = FileOperations::create_file(&new_path) {
+                                        eprintln!("Failed to create file: {}", e);
+                                    } else {
+                                        file_view.refresh();
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    dialog.present(Some(&window));
+                }
+            });
+        }
+
+        // Connect preview toggle
+        {
+            let preview_panel_clone = preview_panel.clone();
+            header_bar.connect_preview_toggle(move |active| {
+                preview_panel_clone.container().set_visible(active);
+            });
+        }
+
+        // Connect sort
+        {
+            let file_view = file_view.clone();
+            header_bar.connect_sort_changed(move |field, direction| {
+                file_view.set_sort_mode(field, direction);
+            });
+        }
+
+        // Update status bar on directory load
+        {
+            let file_view_clone = file_view.clone();
+            let status_file_count_clone = status_file_count.clone();
+            
+            glib::timeout_add_local(std::time::Duration::from_millis(300), move || {
+                let (dirs, files) = file_view_clone.dir_count();
+                let total = dirs + files;
+                if total > 0 {
+                    let mut parts = Vec::new();
+                    if dirs > 0 {
+                        parts.push(format!("{} folder{}", dirs, if dirs == 1 { "" } else { "s" }));
+                    }
+                    if files > 0 {
+                        parts.push(format!("{} file{}", files, if files == 1 { "" } else { "s" }));
+                    }
+                    status_file_count_clone.set_text(&parts.join(", "));
+                } else {
+                    status_file_count_clone.set_text("Empty folder");
+                }
+                glib::ControlFlow::Continue
+            });
+        }
+
+        // Update status bar selection info
+        {
+            let file_view_clone = file_view.clone();
+            let status_selection_clone = status_selection.clone();
+            let preview_panel_clone = preview_panel.clone();
+
+            glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
+                let selected = file_view_clone.get_selected_paths();
+                if selected.is_empty() {
+                    status_selection_clone.set_text("");
+                    // Don't clear preview - let it keep showing last selected
+                } else {
+                    let count = selected.len();
+                    if count == 1 {
+                        let name = selected[0].file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        status_selection_clone.set_text(&format!("\"{}\" selected", name));
+                        // Update preview panel
+                        preview_panel_clone.update_file(&selected[0]);
+                    } else {
+                        status_selection_clone.set_text(&format!("{} items selected", count));
+                    }
+                }
+                glib::ControlFlow::Continue
             });
         }
 
@@ -968,6 +1134,109 @@ impl BlinkWindow {
                             eprintln!("Failed to open micro: {}", e);
                         }
                     }
+                }
+            });
+        }
+
+        // Connect properties dialog
+        {
+            let window_weak = window.downgrade();
+            file_view.connect_properties(move |path| {
+                if let Some(window) = window_weak.upgrade() {
+                    let file_name = path.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "Unknown".to_string());
+                    
+                    let mut body_parts = Vec::new();
+                    
+                    // Location
+                    if let Some(parent) = path.parent() {
+                        body_parts.push(format!("<b>Location:</b> {}", parent.to_string_lossy()));
+                    }
+                    
+                    if let Ok(metadata) = std::fs::metadata(&path) {
+                        // Type
+                        let file_type = if metadata.is_dir() {
+                            "Folder".to_string()
+                        } else {
+                            let ext = path.extension()
+                                .and_then(|e| e.to_str())
+                                .unwrap_or("Unknown")
+                                .to_uppercase();
+                            format!("{} File", ext)
+                        };
+                        body_parts.push(format!("<b>Type:</b> {}", file_type));
+
+                        // Size
+                        let size = if metadata.is_dir() {
+                            fn calc_dir(p: &std::path::Path) -> u64 {
+                                let mut t = 0u64;
+                                if let Ok(entries) = std::fs::read_dir(p) {
+                                    for e in entries.flatten() {
+                                        if let Ok(m) = e.metadata() {
+                                            if m.is_dir() { t += calc_dir(&e.path()); }
+                                            else { t += m.len(); }
+                                        }
+                                    }
+                                }
+                                t
+                            }
+                            calc_dir(&path)
+                        } else {
+                            metadata.len()
+                        };
+
+                        let size_str = if size >= 1_073_741_824 {
+                            format!("{:.2} GB ({} bytes)", size as f64 / 1_073_741_824.0, size)
+                        } else if size >= 1_048_576 {
+                            format!("{:.1} MB ({} bytes)", size as f64 / 1_048_576.0, size)
+                        } else if size >= 1024 {
+                            format!("{:.1} KB ({} bytes)", size as f64 / 1024.0, size)
+                        } else {
+                            format!("{} bytes", size)
+                        };
+                        body_parts.push(format!("<b>Size:</b> {}", size_str));
+
+                        // Modified
+                        if let Ok(modified) = metadata.modified() {
+                            let datetime: chrono::DateTime<chrono::Local> = modified.into();
+                            body_parts.push(format!("<b>Modified:</b> {}", datetime.format("%Y-%m-%d %H:%M:%S")));
+                        }
+
+                        // Permissions
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            let mode = metadata.permissions().mode();
+                            let chars = [
+                                if mode & 0o400 != 0 { 'r' } else { '-' },
+                                if mode & 0o200 != 0 { 'w' } else { '-' },
+                                if mode & 0o100 != 0 { 'x' } else { '-' },
+                                if mode & 0o040 != 0 { 'r' } else { '-' },
+                                if mode & 0o020 != 0 { 'w' } else { '-' },
+                                if mode & 0o010 != 0 { 'x' } else { '-' },
+                                if mode & 0o004 != 0 { 'r' } else { '-' },
+                                if mode & 0o002 != 0 { 'w' } else { '-' },
+                                if mode & 0o001 != 0 { 'x' } else { '-' },
+                            ];
+                            let perm_str: String = chars.iter().collect();
+                            body_parts.push(format!("<b>Permissions:</b> {} ({:o})", perm_str, mode & 0o777));
+                        }
+                    }
+                    
+                    let body_text = body_parts.join("\n");
+
+                    let dialog = adw::AlertDialog::builder()
+                        .heading(&format!("Properties — {}", file_name))
+                        .body_use_markup(true)
+                        .body(&body_text)
+                        .build();
+
+                    dialog.add_response("close", "Close");
+                    dialog.set_default_response(Some("close"));
+                    dialog.set_close_response("close");
+
+                    dialog.present(Some(&window));
                 }
             });
         }
