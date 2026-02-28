@@ -7,6 +7,7 @@ mod pinned;
 mod scanner;
 mod search;
 mod sidebar_prefs;
+pub mod thumbnailer;
 
 pub use clipboard::{Clipboard, ClipboardMode};
 pub use color_config::ColorConfig;
@@ -20,3 +21,4 @@ pub use config::{Keybind, KeybindAction, KeybindConfig};
 pub use drives::{DriveInfo, DriveScanner};
 pub use pinned::{PinnedFolderObject, PinnedFolderStore};
 pub use sidebar_prefs::SidebarPrefs;
+pub use thumbnailer::Thumbnailer;

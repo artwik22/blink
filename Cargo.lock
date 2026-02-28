@@ -51,6 +51,7 @@ dependencies = [
  "async-channel",
  "chrono",
  "dirs",
+ "gdk-pixbuf",
  "gio",
  "glib",
  "gtk4",

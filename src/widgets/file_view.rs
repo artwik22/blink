@@ -42,9 +42,11 @@ mod imp {
     use gtk4::glib;
     use gtk4::glib::Object;
     use gtk4::subclass::prelude::*;
+    use gtk4::prelude::*;
     use std::cell::RefCell;
 
-    #[derive(Default)]
+    #[derive(Default, glib::Properties)]
+    #[properties(wrapper_type = super::FileObject)]
     pub struct FileObject {
         pub name: RefCell<String>,
         pub path: RefCell<String>,
@@ -52,6 +54,8 @@ mod imp {
         pub size: RefCell<String>,
         pub modified: RefCell<String>,
         pub icon_name: RefCell<String>,
+        #[property(get, set, nullable)]
+        pub thumbnail: RefCell<Option<gtk4::gdk::Texture>>,
     }
 
     #[glib::object_subclass]
@@ -61,6 +65,7 @@ mod imp {
         type ParentType = Object;
     }
 
+    #[glib::derived_properties]
     impl ObjectImpl for FileObject {}
 }
 
@@ -77,7 +82,36 @@ impl FileObject {
         *obj.imp().size.borrow_mut() = entry.size_display();
         *obj.imp().modified.borrow_mut() = entry.modified.clone();
         *obj.imp().icon_name.borrow_mut() = Self::get_nautilus_icon(&entry.name, entry.is_directory);
+        obj.update_thumbnail();
         obj
+    }
+
+    pub fn update_thumbnail(&self) {
+        let path = self.path();
+        let obj = self.clone();
+        
+        let (tx, rx) = async_channel::bounded(1);
+        
+        // Load thumbnail bytes in background thread
+        std::thread::spawn(move || {
+            if let Some(bytes) = crate::core::Thumbnailer::get_thumbnail_bytes(&path, 64) {
+                let _ = tx.send_blocking(bytes);
+            }
+        });
+
+        // Receive on main thread and update UI
+        glib::spawn_future_local(async move {
+            if let Ok(bytes) = rx.recv().await {
+                let loader = gtk4::gdk_pixbuf::PixbufLoader::new();
+                if loader.write(&bytes).is_ok() && loader.close().is_ok() {
+                    if let Some(pixbuf) = loader.pixbuf() {
+                        let texture = gtk4::gdk::Texture::for_pixbuf(&pixbuf);
+                        *obj.imp().thumbnail.borrow_mut() = Some(texture);
+                        obj.notify("thumbnail");
+                    }
+                }
+            }
+        });
     }
 
     fn get_nautilus_icon(name: &str, is_directory: bool) -> String {
@@ -255,8 +289,36 @@ impl FileGridView {
             let icon = tile.first_child().and_downcast::<gtk4::Image>().unwrap();
             let name_label = icon.next_sibling().and_downcast::<Label>().unwrap();
 
-            icon.set_icon_name(Some(&file_obj.icon_name()));
+            let update_icon = {
+                let icon = icon.clone();
+                let file_obj = file_obj.clone();
+                move || {
+                    if let Some(thumbnail) = file_obj.thumbnail() {
+                        icon.set_paintable(Some(&thumbnail));
+                    } else {
+                        icon.set_icon_name(Some(&file_obj.icon_name()));
+                    }
+                }
+            };
+            
+            update_icon();
+            let handler_id = file_obj.connect_notify_local(Some("thumbnail"), move |_, _| {
+                update_icon();
+            });
+            unsafe {
+                item.set_data("notify-handler", handler_id);
+            }
+
             name_label.set_text(&file_obj.name());
+        });
+
+        grid_factory.connect_unbind(|_, item| {
+            let item = item.downcast_ref::<ListItem>().unwrap();
+            if let Some(handler_id) = unsafe { item.steal_data::<glib::SignalHandlerId>("notify-handler") } {
+                if let Some(file_obj) = item.item().and_downcast::<FileObject>() {
+                    file_obj.disconnect(handler_id);
+                }
+            }
         });
 
         let grid_view = GridView::builder()
@@ -325,10 +387,37 @@ impl FileGridView {
             let size_label = name_label.next_sibling().and_downcast::<Label>().unwrap();
             let date_label = size_label.next_sibling().and_downcast::<Label>().unwrap();
 
-            icon.set_icon_name(Some(&file_obj.icon_name()));
+            let update_icon = {
+                let icon = icon.clone();
+                let file_obj = file_obj.clone();
+                move || {
+                    if let Some(thumbnail) = file_obj.thumbnail() {
+                        icon.set_paintable(Some(&thumbnail));
+                    } else {
+                        icon.set_icon_name(Some(&file_obj.icon_name()));
+                    }
+                }
+            };
+
+            update_icon();
+            let handler_id = file_obj.connect_notify_local(Some("thumbnail"), move |_, _| {
+                update_icon();
+            });
+            unsafe {
+                item.set_data("notify-handler", handler_id);
+            }
+
             name_label.set_text(&file_obj.name());
             size_label.set_text(&file_obj.size());
             date_label.set_text(&file_obj.modified());
+        });
+
+        list_factory.connect_unbind(|_, item| {
+            let item = item.downcast_ref::<ListItem>().unwrap();
+            if let Some(handler_id) = unsafe { item.steal_data::<glib::SignalHandlerId>("notify-handler") } {                if let Some(file_obj) = item.item().and_downcast::<FileObject>() {
+                    file_obj.disconnect(handler_id);
+                }
+            }
         });
 
         let list_view = ListView::builder()

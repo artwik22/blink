@@ -52,6 +52,7 @@ pub struct NautilusSidebar {
     other_list_box: ListBox,
     pinned_store: PinnedFolderStore,
     on_location_selected: Rc<RefCell<Option<Box<dyn Fn(PathBuf)>>>>,
+    volume_monitor: gio::VolumeMonitor,
 }
 
 impl NautilusSidebar {
@@ -319,6 +320,36 @@ impl NautilusSidebar {
         scrolled.set_child(Some(&main_box));
         container.append(&scrolled);
 
+        // Setup volume monitor for automatic drive detection
+        let volume_monitor = gio::VolumeMonitor::get();
+        
+        {
+            let other_lb = other_list_box.clone();
+            let pinned_st = pinned_store.clone();
+            
+            volume_monitor.connect_mount_added(move |_, _| {
+                Self::refresh_other_locations(&other_lb, &pinned_st);
+            });
+        }
+        
+        {
+            let other_lb = other_list_box.clone();
+            let pinned_st = pinned_store.clone();
+            
+            volume_monitor.connect_mount_removed(move |_, _| {
+                Self::refresh_other_locations(&other_lb, &pinned_st);
+            });
+        }
+
+        {
+            let other_lb = other_list_box.clone();
+            let pinned_st = pinned_store.clone();
+            
+            volume_monitor.connect_mount_changed(move |_, _| {
+                Self::refresh_other_locations(&other_lb, &pinned_st);
+            });
+        }
+
         // Selection sync: ensure only one ListBox has a selection at a time
         {
             let pinned_lb = pinned_list_box.clone();
@@ -394,7 +425,49 @@ impl NautilusSidebar {
             other_list_box,
             pinned_store,
             on_location_selected,
+            volume_monitor,
         }
+    }
+
+    /// Refresh the "Other Locations" section (drives)
+    fn refresh_other_locations(list_box: &ListBox, pinned_store: &PinnedFolderStore) {
+        // Clear existing items except "Computer"
+        let mut to_remove = Vec::new();
+        let mut iter = list_box.first_child();
+        while let Some(child) = iter {
+            if let Ok(row) = child.clone().downcast::<ListBoxRow>() {
+                if let Some(name_label) = row.child().and_then(|c| c.downcast::<GtkBox>().ok())
+                    .and_then(|b| b.last_child())
+                    .and_then(|l| l.downcast::<Label>().ok()) {
+                    if name_label.text() != "Computer" {
+                        to_remove.push(row);
+                    }
+                }
+            }
+            iter = child.next_sibling();
+        }
+        
+        for row in to_remove {
+            list_box.remove(&row);
+        }
+
+        // Add other drives
+        let drives = DriveScanner::scan();
+        for drive in &drives {
+            if drive.mount_point == PathBuf::from("/") {
+                continue;
+            }
+            if let Some(home) = dirs::home_dir() {
+                if drive.mount_point == home {
+                    continue;
+                }
+            }
+            Self::add_standard_location(list_box, &drive.name, &drive.icon_name, 
+                drive.mount_point.clone(), SidebarItemType::Drive);
+        }
+        
+        // Re-setup context menu for new items
+        Self::setup_standard_context_menu(list_box, pinned_store);
     }
 
     /// Bind the pinned store to a ListBox using a factory function

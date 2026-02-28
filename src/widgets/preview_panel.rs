@@ -1,7 +1,6 @@
 use gtk4::prelude::*;
 use gtk4::{Box as GtkBox, Image, Label, Orientation, Picture, ScrolledWindow, Separator};
-use libadwaita as adw;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::fs;
 
 #[derive(Clone)]
@@ -302,6 +301,24 @@ impl PreviewPanel {
                 buffer.set_text("(Cannot read file)");
             }
             self.stack.set_visible_child_name("text");
+        } else if Self::is_video(path) {
+            // Show video preview via thumbnailer
+            if let Some(bytes) = crate::core::Thumbnailer::get_thumbnail_bytes(path, 248) {
+                let loader = gtk4::gdk_pixbuf::PixbufLoader::new();
+                if loader.write(&bytes).is_ok() && loader.close().is_ok() {
+                    if let Some(pixbuf) = loader.pixbuf() {
+                        let texture = gtk4::gdk::Texture::for_pixbuf(&pixbuf);
+                        self.image_picture.set_paintable(Some(&texture));
+                        self.stack.set_visible_child_name("image");
+                    } else {
+                        self.stack.set_visible_child_name("info");
+                    }
+                } else {
+                    self.stack.set_visible_child_name("info");
+                }
+            } else {
+                self.stack.set_visible_child_name("info");
+            }
         } else {
             self.stack.set_visible_child_name("info");
         }
@@ -334,6 +351,14 @@ impl PreviewPanel {
             "gitignore" | "env" | "editorconfig" |
             "csv" | "tsv"
         )
+    }
+
+    fn is_video(path: &Path) -> bool {
+        let ext = path.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        matches!(ext.as_str(), "mp4" | "mkv" | "avi" | "mov" | "webm" | "wmv" | "flv")
     }
 
     fn get_mime_type(name: &str) -> String {
