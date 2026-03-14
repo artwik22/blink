@@ -1,0 +1,7 @@
+/target
+/target/
+
+# Common temp files
+*.tmp
+*.bak
+*~
